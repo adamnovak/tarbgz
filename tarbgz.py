@@ -10,7 +10,6 @@ Usage examples:
     ./tarbgz.py example.tar.gz example.tar.gz.index --index
     ./tarbgz.py example.tar.gz example.tar.gz.index --find ""
     ./tarbgz.py example.tar.gz example.tar.gz.index --find "demo"
-    ./tarbgz.py example.tar.gz example.tar.gz.index --extract "demo"
     ./tarbgz.py example.tar.gz example.tar.gz.index --extract "demo/test.c"
 
 """
@@ -112,21 +111,23 @@ class IndexEntry(object):
 
     """
     
-    def __init__(self, virtual_offset, real_offset, size):
+    def __init__(self, virtual_offset, real_offset, size, next_virtual_offset):
         """
         Make a new entry with the given virtual and real offsets and file size.
+        The next virtual offset is also stored, allowing the real byte range in the underlying bgzip file to be calculated.
         """
         
         self.virtual_offset = virtual_offset
         self.real_offset = real_offset
         self.size = size
+        self.next_virtual_offset = next_virtual_offset
         
     def __repr__(self):
         """
         Represent this entry as a string.
         """
         
-        return "IndexEntry({}, {}, {})".format(self.virtual_offset, self.real_offset, self.size)
+        return "IndexEntry({}, {}, {}, {})".format(self.virtual_offset, self.real_offset, self.size, self.next_virtual_offset)
         
 class IndexNode:
     """
@@ -358,18 +359,20 @@ def main(args):
             logging.info("Virtual offset: {} Decompressed offset: {}".format(bgzf_offset, tar_offset))
             logging.info("tarinfo offset: {} tarinfo data offset: {} tarinfo size: {}".format(info.offset, info.offset_data, info.size))
             logging.info("tarfile offset: {}".format(archive_tar.offset))
-            
-            # Make an IndexEntry for the file
-            entry = IndexEntry(bgzf_offset, tar_offset, info.size)
-            
-            # Record data in the index
-            index.insert(info.name, entry)
-            
-            
-            # Now archive_tar.offset holds the uncompressed file offset of the *next* entry in the tar file.
+           
+            # Before we can make a record for this file, we need to know where the next file/EOF is.
+           
+            # archive_tar.offset holds the uncompressed file offset of the *next* entry in the tar file.
             # Seek there so we can get its bgzf virtual offset.
             archive_wrapper.seek(archive_tar.offset)
             logging.info("Manual seek to {} complete".format(archive_tar.offset))
+            
+            # Make an IndexEntry for this file, but which knows the virtual offset of the next file
+            # This means it can define a used byte range in the bgzf file for asynchronous retrieval
+            entry = IndexEntry(bgzf_offset, tar_offset, info.size, archive_bgzf.tell())
+            
+            # Record data in the index
+            index.insert(info.name, entry)
             
             # Update offsets for next file
             bgzf_offset = archive_bgzf.tell()
