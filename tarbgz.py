@@ -378,6 +378,9 @@ def main(args):
             bgzf_offset = archive_bgzf.tell()
             tar_offset = archive_wrapper.tell()
             
+            # Clear out the members to avoid leaking memory by remembering them all until the file is closed.
+            archive_tar.members = []
+            
         logging.info("Index complete")
         logging.info(index)
         
